@@ -21,6 +21,6 @@ if ! claude mcp get playwright &>/dev/null; then
 fi
 
 # Setup firewall
-sudo /usr/local/bin/init-firewall.sh
+sudo ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}" /usr/local/bin/init-firewall.sh
 
 exec "$@"
