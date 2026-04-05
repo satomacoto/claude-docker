@@ -48,9 +48,13 @@ Spawn a Claude Code teammate inside a Docker container for sandboxed execution.
 
    Replace `{cwd}` with the actual working directory, `{team-name}` with the team name, `{teammate-name}` with the teammate name, and `{leadSessionId}` with the leader's session ID from the config.
 
-4. **Wait for startup**: The container needs ~15-20 seconds to initialize (entrypoint, firewall setup, Claude Code startup). Verify by capturing the tmux pane output and checking for the `@{teammate-name}` prompt.
+4. **Wait for startup**: The container needs ~15-20 seconds to initialize (entrypoint, firewall setup, Claude Code startup). Send a test message via SendMessage to verify communication. A reply confirms the teammate is ready.
 
 5. **Confirm**: `{teammate-name}` is ready. Use SendMessage to assign tasks.
+
+## Note on config.json registration
+
+Docker teammates launched via `docker run` are **not** auto-registered in `~/.claude/teams/{team-name}/config.json` members array. This is expected — only teammates spawned through Claude Code's internal Agent tool are registered automatically. Message routing works via `--agent-id` and `--parent-session-id` through inbox files, so config.json registration is not required for communication.
 
 ## Firewall
 
