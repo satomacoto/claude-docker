@@ -34,18 +34,29 @@ Interactive mode:
 
 ```bash
 docker run -it --rm \
+  --cap-add NET_ADMIN \
   -v claude-config:/home/node/.claude \
   -v $(pwd):/workspace \
-  claude-code claude
+  claude-code bash -c "sudo /usr/local/bin/init-firewall.sh && claude --dangerously-skip-permissions"
 ```
 
 One-shot mode:
 
 ```bash
 docker run --rm \
+  --cap-add NET_ADMIN \
   -v claude-config:/home/node/.claude \
   -v $(pwd):/workspace \
-  claude-code claude -p "Explain this project"
+  claude-code bash -c "sudo /usr/local/bin/init-firewall.sh && claude --dangerously-skip-permissions -p 'Explain this project'"
+```
+
+Without firewall (not recommended):
+
+```bash
+docker run -it --rm \
+  -v claude-config:/home/node/.claude \
+  -v $(pwd):/workspace \
+  claude-code claude
 ```
 
 ### 4. Docker Compose
