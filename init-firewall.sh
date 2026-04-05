@@ -86,6 +86,31 @@ for domain in \
     done < <(echo "$ips")
 done
 
+# Add extra domains from ALLOWED_DOMAINS env var (comma-separated)
+if [ -n "${ALLOWED_DOMAINS:-}" ]; then
+    IFS=',' read -ra EXTRA_DOMAINS <<< "$ALLOWED_DOMAINS"
+    for domain in "${EXTRA_DOMAINS[@]}"; do
+        domain=$(echo "$domain" | xargs)  # trim whitespace
+        [ -z "$domain" ] && continue
+        echo "Resolving extra domain: $domain..."
+        ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
+        if [ -z "$ips" ]; then
+            echo "WARNING: Failed to resolve extra domain $domain (skipping)"
+            continue
+        fi
+
+        while read -r ip; do
+            if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                echo "WARNING: Invalid IP from DNS for $domain: $ip (skipping)"
+                continue
+            fi
+            cidr=$(echo "$ip" | sed 's/\.[0-9]*$/.0\/24/')
+            echo "Adding $cidr for $domain (resolved: $ip)"
+            ipset add allowed-domains "$cidr" 2>/dev/null || true
+        done < <(echo "$ips")
+    done
+fi
+
 # Get host IP from default route
 HOST_IP=$(ip route | grep default | cut -d" " -f3)
 if [ -z "$HOST_IP" ]; then

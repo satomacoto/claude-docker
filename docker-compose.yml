@@ -9,6 +9,7 @@ services:
     environment:
       - GIT_USER_NAME=${GIT_USER_NAME}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL}
+      - ALLOWED_DOMAINS=${ALLOWED_DOMAINS:-}
     volumes:
       - claude-config:/home/node/.claude
       - .:/workspace

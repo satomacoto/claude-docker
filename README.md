@@ -87,6 +87,22 @@ docker run -it --rm -v claude-config:/home/node/.claude claude-code claude login
 docker build --no-cache -t claude-code .
 ```
 
+## Firewall
+
+The container restricts outbound connections to whitelisted domains only. The following domains are always allowed:
+
+- GitHub (API, Web, Git+SSH)
+- `registry.npmjs.org` (npm)
+- `api.anthropic.com`, `sentry.io`, `statsig.anthropic.com`, `statsig.com` (Claude Code)
+
+Additional domains can be allowed via the `ALLOWED_DOMAINS` environment variable (comma-separated) in `.env`:
+
+```env
+ALLOWED_DOMAINS=pypi.org,files.pythonhosted.org,registry.npmjs.org
+```
+
+The firewall is applied at container startup and cannot be modified from inside the container. Changes to `ALLOWED_DOMAINS` require a container restart.
+
 ## Security notes
 
 - The named volume isolates credentials from the host filesystem.

@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:24-slim
 
 ARG CLAUDE_CODE_VERSION=latest
 
