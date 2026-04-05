@@ -48,15 +48,18 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} @playwright/mcp
 
 # Install Playwright browsers as node user
 RUN npx playwright install chromium
 
 USER root
 COPY init-firewall.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/init-firewall.sh && \
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh && \
     echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
     chmod 0440 /etc/sudoers.d/node-firewall
 
 USER node
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["claude", "--dangerously-skip-permissions"]

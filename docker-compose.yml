@@ -6,11 +6,12 @@ services:
     tty: true
     cap_add:
       - NET_ADMIN
+    environment:
+      - GIT_USER_NAME=${GIT_USER_NAME}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL}
     volumes:
       - claude-config:/home/node/.claude
       - .:/workspace
-    command: >
-      bash -c "sudo /usr/local/bin/init-firewall.sh && claude --dangerously-skip-permissions"
 
 volumes:
   claude-config:

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Playwright MCP Test</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+    h1 { color: #333; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+    #output { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 8px; min-height: 40px; }
+    input { padding: 8px; font-size: 16px; width: 200px; }
+  </style>
+</head>
+<body>
+  <h1>Playwright MCP Test Page</h1>
+  <p>This is a test page for Playwright MCP.</p>
+
+  <div>
+    <input type="text" id="nameInput" placeholder="Enter your name" />
+    <button id="greetBtn">Greet</button>
+    <button id="countBtn">Count</button>
+  </div>
+
+  <div id="output">Click a button to see output here.</div>
+
+  <script>
+    let count = 0;
+    document.getElementById('greetBtn').addEventListener('click', () => {
+      const name = document.getElementById('nameInput').value || 'World';
+      document.getElementById('output').textContent = `Hello, ${name}!`;
+    });
+    document.getElementById('countBtn').addEventListener('click', () => {
+      count++;
+      document.getElementById('output').textContent = `Count: ${count}`;
+    });
+  </script>
+</body>
+</html>
