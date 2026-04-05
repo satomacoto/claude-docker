@@ -27,9 +27,19 @@ else
     echo "No Docker DNS rules to restore"
 fi
 
-# Allow DNS only to Docker's internal resolver
-iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j ACCEPT
-iptables -A INPUT -s 127.0.0.11 -p udp --sport 53 -j ACCEPT
+# Allow DNS to all nameservers listed in /etc/resolv.conf
+DNS_SERVERS=$(grep '^nameserver' /etc/resolv.conf | awk '{print $2}')
+if [ -z "$DNS_SERVERS" ]; then
+    echo "ERROR: No nameservers found in /etc/resolv.conf"
+    exit 1
+fi
+for dns in $DNS_SERVERS; do
+    echo "Allowing DNS to $dns"
+    iptables -A OUTPUT -d "$dns" -p udp --dport 53 -j ACCEPT
+    iptables -A INPUT -s "$dns" -p udp --sport 53 -j ACCEPT
+    iptables -A OUTPUT -d "$dns" -p tcp --dport 53 -j ACCEPT
+    iptables -A INPUT -s "$dns" -p tcp --sport 53 -j ACCEPT
+done
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
