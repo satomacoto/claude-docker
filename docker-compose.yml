@@ -1,0 +1,16 @@
+services:
+  claude:
+    build: .
+    image: claude-code
+    stdin_open: true
+    tty: true
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - claude-config:/home/node/.claude
+      - .:/workspace
+    command: >
+      bash -c "sudo /usr/local/bin/init-firewall.sh && claude --dangerously-skip-permissions"
+
+volumes:
+  claude-config:
