@@ -1,5 +1,5 @@
 ---
-name: docker-sandbox
+name: spawn-docker-sandbox
 description: Spawn a sandboxed Claude Code teammate running inside a Docker container (claude-code image) with optional iptables firewall. Use when the user wants to run untrusted tasks in isolation, or when any teammate should be confined to a container.
 argument-hint: "[teammate-name]"
 ---
