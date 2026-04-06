@@ -41,10 +41,11 @@ sh.rustup.rs
 .rust-lang.org
 
 # Anthropic + Claude Code
-api.anthropic.com
+.anthropic.com
+.claude.ai
+.claude.com
 sentry.io
 .statsig.com
-statsig.anthropic.com
 
 # OS package repos
 .debian.org
