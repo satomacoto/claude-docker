@@ -4,6 +4,12 @@ set -euo pipefail
 
 IFS=$'\n\t'
 
+# Skip if iptables is not available (no NET_ADMIN capability)
+if ! iptables -L -n &>/dev/null; then
+  echo "Skipping firewall setup (NET_ADMIN capability not available)"
+  exit 0
+fi
+
 # 1. Extract Docker DNS info BEFORE any flushing
 DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
 

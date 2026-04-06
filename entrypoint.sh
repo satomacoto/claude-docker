@@ -20,7 +20,7 @@ if ! claude mcp get playwright &>/dev/null; then
   claude mcp add playwright --scope user --transport stdio -- playwright-mcp --headless --browser chromium
 fi
 
-# Setup firewall
+# Setup firewall (init-firewall.sh exits gracefully if NET_ADMIN is unavailable)
 sudo ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}" /usr/local/bin/init-firewall.sh
 
 exec "$@"
