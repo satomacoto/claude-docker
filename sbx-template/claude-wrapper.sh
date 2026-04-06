@@ -1,9 +1,10 @@
 #!/bin/bash
 # Wrapper that runs sbx-specific init logic before exec'ing the real claude.
 #
-# When sbx mounts ~/.claude/teams as an additional workspace, it appears
-# at the host's absolute path (e.g. /Users/foo/.claude/teams). Claude Code
-# expects them under $HOME/.claude/{teams,tasks}, so we symlink them.
+# - Symlinks the host's mounted ~/.claude/teams and ~/.claude/tasks (which sbx
+#   places at the host's absolute path) into $HOME/.claude/ so Claude Code's
+#   inbox poller finds them.
+# - Registers the playwright MCP server in user scope on first run.
 
 set -e
 
@@ -19,5 +20,10 @@ for entry in teams tasks; do
     ln -sfn "$mounted" "$HOME/.claude/$entry"
   fi
 done
+
+# Register playwright MCP server (skip if already configured)
+if ! /home/agent/.local/bin/claude-real mcp get playwright &>/dev/null; then
+  /home/agent/.local/bin/claude-real mcp add playwright --scope user --transport stdio -- playwright-mcp --headless --browser chromium &>/dev/null || true
+fi
 
 exec /home/agent/.local/bin/claude-real "$@"

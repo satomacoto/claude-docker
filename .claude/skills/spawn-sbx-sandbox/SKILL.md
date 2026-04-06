@@ -17,7 +17,14 @@ Spawn a Claude Code teammate inside a Docker Sandboxes microVM. Stronger isolati
 - `sbx` CLI installed: `brew install docker/tap/sbx`
 - Logged in: `sbx login` (one-time)
 - Default network policy set: `sbx policy set-default balanced` (one-time)
-- Custom template `satomacoto/sandbox-templates:claude-code` published to Docker Hub. This template extends `docker/sandbox-templates:claude-code` with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enabled and a wrapper that symlinks the host's mounted `~/.claude/teams` and `~/.claude/tasks` into the sandbox's `$HOME/.claude/`. Source in this repo at `sbx-template/`.
+- Custom template `satomacoto/sandbox-templates:claude-code` published to Docker Hub. This template extends `docker/sandbox-templates:claude-code` with:
+  - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enabled
+  - A wrapper that symlinks the host's mounted `~/.claude/teams` and `~/.claude/tasks` into the sandbox's `$HOME/.claude/`
+  - Playwright + Chromium pre-installed and `playwright-mcp` server auto-registered
+  
+  Source in this repo at `sbx-template/`.
+
+> **Note**: sbx caches template images locally and does not auto-update them. If the template was rebuilt, either pin the new digest in `--template`, or run `sbx reset` to clear the cache (destructive: removes all sandboxes/secrets).
 
 ## Steps
 
