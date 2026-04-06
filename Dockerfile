@@ -6,10 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     sudo \
     iptables \
-    ipset \
     iproute2 \
     dnsutils \
-    aggregate \
     jq \
     curl \
     wget \
@@ -17,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     openssh-client \
     ripgrep \
+    squid \
+    netcat-openbsd \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
@@ -54,6 +54,7 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} @playwright/
 RUN npx playwright install chromium
 
 USER root
+COPY squid.conf /etc/squid/squid.conf
 COPY init-firewall.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh && \

@@ -1,179 +1,180 @@
 #!/bin/bash
+# Set up squid as a forward proxy with a domain allowlist, then use iptables
+# (if NET_ADMIN is available) to force all non-proxy outbound traffic to drop.
+#
+# This replaces the previous IP-based iptables approach. Domain-based filtering
+# works correctly with CDNs (no stale IP problem) and is much easier to manage.
 
 set -euo pipefail
 
 IFS=$'\n\t'
 
-# Skip if iptables is not available (no NET_ADMIN capability)
+DOMAINS_FILE=/etc/squid/allowed_domains.txt
+mkdir -p /etc/squid /var/log/squid /var/cache/squid
+chown proxy:proxy /var/log/squid /var/cache/squid
+
+# Default allowlist: developer essentials (GitHub, npm, PyPI, Anthropic, etc.)
+# Note: squid's dstdomain ACL treats a leading dot as "this domain and all
+# subdomains", and errors if you list both `foo.com` and `.foo.com`. So each
+# entry must be either a bare hostname OR `.parent` — not both.
+cat > "$DOMAINS_FILE" << 'EOF'
+# Version control and code hosting
+.github.com
+.githubusercontent.com
+.gitlab.com
+.bitbucket.org
+
+# Package managers
+.npmjs.org
+.npmjs.com
+.yarnpkg.com
+.pypi.org
+.pythonhosted.org
+.rubygems.org
+.crates.io
+.goproxy.io
+proxy.golang.org
+
+# Python / Rust toolchains
+.astral.sh
+sh.rustup.rs
+.rust-lang.org
+
+# Anthropic + Claude Code
+api.anthropic.com
+sentry.io
+.statsig.com
+statsig.anthropic.com
+
+# OS package repos
+.debian.org
+.ubuntu.com
+EOF
+
+# Append extras from ALLOWED_DOMAINS (comma-separated).
+# Leading dot means "domain and subdomains"; bare hostname means exact match.
+if [ -n "${ALLOWED_DOMAINS:-}" ]; then
+  echo "" >> "$DOMAINS_FILE"
+  echo "# From ALLOWED_DOMAINS env var" >> "$DOMAINS_FILE"
+  IFS=',' read -ra EXTRA_DOMAINS <<< "$ALLOWED_DOMAINS"
+  for domain in "${EXTRA_DOMAINS[@]}"; do
+    domain=$(echo "$domain" | xargs)  # trim whitespace
+    [ -z "$domain" ] && continue
+    echo "$domain" >> "$DOMAINS_FILE"
+  done
+fi
+
+echo "Allowed domains written to $DOMAINS_FILE"
+
+# Clear any stale PID file left from a previous run
+rm -f /var/run/squid.pid
+
+# Initialize squid cache dirs if needed, then start the daemon
+# (squid daemonizes itself; this returns immediately)
+squid -z 2>/dev/null || true
+rm -f /var/run/squid.pid  # -z may leave a stale PID file
+squid
+
+# Wait for squid to be ready on port 3128
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if nc -z localhost 3128 2>/dev/null; then
+    echo "Squid is ready on localhost:3128"
+    break
+  fi
+  sleep 0.5
+done
+
+if ! nc -z localhost 3128 2>/dev/null; then
+  echo "ERROR: squid did not start on port 3128"
+  cat /var/log/squid/cache.log 2>/dev/null | tail -20
+  exit 1
+fi
+
+# If iptables is not available (no NET_ADMIN), skip the lockdown.
+# Squid still runs, but enforcement relies on HTTPS_PROXY being respected.
 if ! iptables -L -n &>/dev/null; then
-  echo "Skipping firewall setup (NET_ADMIN capability not available)"
+  echo "Skipping iptables lockdown (NET_ADMIN capability not available)"
+  echo "NOTE: proxy enforcement relies on HTTPS_PROXY env var"
   exit 0
 fi
 
-# 1. Extract Docker DNS info BEFORE any flushing
-DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
+# Preserve Docker's internal DNS nat rules before flushing
+DOCKER_DNS_RULES=$(iptables-save -t nat 2>/dev/null | grep "127\.0\.0\.11" || true)
 
-# Flush existing rules and delete existing ipsets
 iptables -F
 iptables -X
 iptables -t nat -F
 iptables -t nat -X
 iptables -t mangle -F
 iptables -t mangle -X
-ipset destroy allowed-domains 2>/dev/null || true
-ipset destroy github-ips 2>/dev/null || true
 
-# 2. Selectively restore ONLY internal Docker DNS resolution
 if [ -n "$DOCKER_DNS_RULES" ]; then
-    echo "Restoring Docker DNS rules..."
-    iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
-    iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
-    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
-else
-    echo "No Docker DNS rules to restore"
+  iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
+  iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
+  echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
 fi
 
-# Allow DNS to all nameservers listed in /etc/resolv.conf
-DNS_SERVERS=$(grep '^nameserver' /etc/resolv.conf | awk '{print $2}')
-if [ -z "$DNS_SERVERS" ]; then
-    echo "ERROR: No nameservers found in /etc/resolv.conf"
-    exit 1
-fi
-for dns in $DNS_SERVERS; do
-    echo "Allowing DNS to $dns"
-    iptables -A OUTPUT -d "$dns" -p udp --dport 53 -j ACCEPT
-    iptables -A INPUT -s "$dns" -p udp --sport 53 -j ACCEPT
-    iptables -A OUTPUT -d "$dns" -p tcp --dport 53 -j ACCEPT
-    iptables -A INPUT -s "$dns" -p tcp --sport 53 -j ACCEPT
-done
+# Loopback is always allowed (agent ↔ squid runs over loopback)
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
-# Create ipsets with CIDR support
-ipset create allowed-domains hash:net
-ipset create github-ips hash:net
-
-# Fetch GitHub meta information and aggregate + add their IP ranges
-echo "Fetching GitHub IP ranges..."
-gh_ranges=$(curl -s https://api.github.com/meta)
-if [ -z "$gh_ranges" ]; then
-    echo "ERROR: Failed to fetch GitHub IP ranges"
-    exit 1
+# DNS to all nameservers listed in /etc/resolv.conf (both UDP and TCP).
+# Needed so squid can resolve upstream domains.
+DNS_SERVERS=$(grep '^nameserver' /etc/resolv.conf | awk '{print $2}')
+if [ -z "$DNS_SERVERS" ]; then
+  echo "ERROR: No nameservers found in /etc/resolv.conf"
+  exit 1
 fi
-
-if ! echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null; then
-    echo "ERROR: GitHub API response missing required fields"
-    exit 1
-fi
-
-echo "Processing GitHub IPs..."
-while read -r cidr; do
-    if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-        echo "ERROR: Invalid CIDR range from GitHub meta: $cidr"
-        exit 1
-    fi
-    echo "Adding GitHub range $cidr"
-    ipset add allowed-domains "$cidr"
-    ipset add github-ips "$cidr"
-done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
-
-# Resolve and add other allowed domains as /24 subnets for resilience against IP changes
-for domain in \
-    "registry.npmjs.org" \
-    "api.anthropic.com" \
-    "sentry.io" \
-    "statsig.anthropic.com" \
-    "statsig.com"; do
-    echo "Resolving $domain..."
-    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
-    if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
-    fi
-
-    while read -r ip; do
-        if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo "ERROR: Invalid IP from DNS for $domain: $ip"
-            exit 1
-        fi
-        cidr=$(echo "$ip" | sed 's/\.[0-9]*$/.0\/24/')
-        echo "Adding $cidr for $domain (resolved: $ip)"
-        ipset add allowed-domains "$cidr" 2>/dev/null || true
-    done < <(echo "$ips")
+for dns in $DNS_SERVERS; do
+  echo "Allowing DNS to $dns"
+  iptables -A OUTPUT -d "$dns" -p udp --dport 53 -j ACCEPT
+  iptables -A INPUT -s "$dns" -p udp --sport 53 -j ACCEPT
+  iptables -A OUTPUT -d "$dns" -p tcp --dport 53 -j ACCEPT
+  iptables -A INPUT -s "$dns" -p tcp --sport 53 -j ACCEPT
 done
 
-# Add extra domains from ALLOWED_DOMAINS env var (comma-separated)
-if [ -n "${ALLOWED_DOMAINS:-}" ]; then
-    IFS=',' read -ra EXTRA_DOMAINS <<< "$ALLOWED_DOMAINS"
-    for domain in "${EXTRA_DOMAINS[@]}"; do
-        domain=$(echo "$domain" | xargs)  # trim whitespace
-        [ -z "$domain" ] && continue
-        echo "Resolving extra domain: $domain..."
-        ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
-        if [ -z "$ips" ]; then
-            echo "WARNING: Failed to resolve extra domain $domain (skipping)"
-            continue
-        fi
+# Allow the squid user (`proxy`) to make outbound TCP connections anywhere.
+# Everyone else must go through squid via loopback, which will enforce the
+# domain allowlist. This is how per-process isolation works here.
+SQUID_UID=$(id -u proxy)
+iptables -A OUTPUT -m owner --uid-owner "$SQUID_UID" -j ACCEPT
 
-        while read -r ip; do
-            if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-                echo "WARNING: Invalid IP from DNS for $domain: $ip (skipping)"
-                continue
-            fi
-            cidr=$(echo "$ip" | sed 's/\.[0-9]*$/.0\/24/')
-            echo "Adding $cidr for $domain (resolved: $ip)"
-            ipset add allowed-domains "$cidr" 2>/dev/null || true
-        done < <(echo "$ips")
-    done
-fi
-
-# Get host IP from default route
-HOST_IP=$(ip route | grep default | cut -d" " -f3)
-if [ -z "$HOST_IP" ]; then
-    echo "ERROR: Failed to detect host IP"
-    exit 1
-fi
-
-HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
-echo "Host network detected as: $HOST_NETWORK"
-
-# Allow SSH only to GitHub IPs (for git+ssh)
-iptables -A OUTPUT -p tcp --dport 22 -m set --match-set github-ips dst -j ACCEPT
-
-# Set up remaining iptables rules
-iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
-
-# Allow established connections and whitelisted domains (HTTPS only) BEFORE setting DROP policy
+# Established / related return traffic
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 443 -m set --match-set allowed-domains dst -j ACCEPT
 
-# Explicitly REJECT all other outbound traffic for immediate feedback
-iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
-
-# Now set default policies to DROP (all rules are already in place)
+# Default policies: drop everything else
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
 iptables -P OUTPUT DROP
 
-# Block all IPv6 traffic
-ip6tables -P INPUT DROP
-ip6tables -P FORWARD DROP
-ip6tables -P OUTPUT DROP
+# Block all IPv6
+ip6tables -P INPUT DROP 2>/dev/null || true
+ip6tables -P FORWARD DROP 2>/dev/null || true
+ip6tables -P OUTPUT DROP 2>/dev/null || true
 
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."
-if curl --connect-timeout 5 https://example.com >/dev/null 2>&1; then
-    echo "ERROR: Firewall verification failed - was able to reach https://example.com"
-    exit 1
+
+# Verify: blocked domain through the proxy should fail
+if curl -x http://localhost:3128 --connect-timeout 5 -s -o /dev/null https://example.com 2>/dev/null; then
+  echo "ERROR: Firewall verification failed - example.com reachable via proxy"
+  exit 1
 else
-    echo "Firewall verification passed - unable to reach https://example.com as expected"
+  echo "Firewall verification passed - example.com blocked as expected"
 fi
 
-if ! curl --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
-    echo "ERROR: Firewall verification failed - unable to reach https://api.github.com"
-    exit 1
+# Verify: allowed domain through the proxy should work
+if curl -x http://localhost:3128 --connect-timeout 10 -s -o /dev/null https://api.github.com/zen; then
+  echo "Firewall verification passed - api.github.com reachable via proxy"
 else
-    echo "Firewall verification passed - able to reach https://api.github.com as expected"
+  echo "ERROR: Firewall verification failed - api.github.com unreachable via proxy"
+  exit 1
+fi
+
+# Verify: direct connection (bypassing proxy) should fail
+if curl --connect-timeout 5 -s -o /dev/null https://api.github.com 2>/dev/null; then
+  echo "WARNING: direct HTTPS connection succeeded - proxy bypass may be possible"
+else
+  echo "Firewall verification passed - direct HTTPS blocked"
 fi
