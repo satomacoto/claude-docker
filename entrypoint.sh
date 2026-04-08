@@ -22,7 +22,9 @@ fi
 
 # Setup firewall: starts squid proxy and locks down direct outbound traffic
 # (init-firewall.sh exits gracefully if NET_ADMIN is unavailable)
-sudo ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}" /usr/local/bin/init-firewall.sh
+sudo ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-}" \
+     ALLOW_ALL_DOMAINS="${ALLOW_ALL_DOMAINS:-}" \
+     /usr/local/bin/init-firewall.sh
 
 # Route all HTTP(S) traffic through squid. Non-proxy outbound is blocked
 # at the iptables layer when NET_ADMIN is available.

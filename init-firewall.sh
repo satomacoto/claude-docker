@@ -13,11 +13,21 @@ DOMAINS_FILE=/etc/squid/allowed_domains.txt
 mkdir -p /etc/squid /var/log/squid /var/cache/squid
 chown proxy:proxy /var/log/squid /var/cache/squid
 
-# Default allowlist: developer essentials (GitHub, npm, PyPI, Anthropic, etc.)
-# Note: squid's dstdomain ACL treats a leading dot as "this domain and all
-# subdomains", and errors if you list both `foo.com` and `.foo.com`. So each
-# entry must be either a bare hostname OR `.parent` — not both.
-cat > "$DOMAINS_FILE" << 'EOF'
+if [ "${ALLOW_ALL_DOMAINS:-}" = "1" ]; then
+  # In fully-open mode, the allowed_domains ACL is not consulted by
+  # http_access, but squid still parses its source file at startup.
+  # Write a minimal safe stub so the ACL stays well-formed regardless of
+  # any ALLOWED_DOMAINS value the user may have set in .env.
+  cat > "$DOMAINS_FILE" << 'EOF'
+# ALLOW_ALL_DOMAINS=1: allowlist unused
+.invalid
+EOF
+else
+  # Default allowlist: developer essentials (GitHub, npm, PyPI, Anthropic, etc.)
+  # Note: squid's dstdomain ACL treats a leading dot as "this domain and all
+  # subdomains", and errors if you list both `foo.com` and `.foo.com`. So each
+  # entry must be either a bare hostname OR `.parent` — not both.
+  cat > "$DOMAINS_FILE" << 'EOF'
 # Version control and code hosting
 .github.com
 .githubusercontent.com
@@ -52,20 +62,58 @@ sentry.io
 .ubuntu.com
 EOF
 
-# Append extras from ALLOWED_DOMAINS (comma-separated).
-# Leading dot means "domain and subdomains"; bare hostname means exact match.
-if [ -n "${ALLOWED_DOMAINS:-}" ]; then
-  echo "" >> "$DOMAINS_FILE"
-  echo "# From ALLOWED_DOMAINS env var" >> "$DOMAINS_FILE"
-  IFS=',' read -ra EXTRA_DOMAINS <<< "$ALLOWED_DOMAINS"
-  for domain in "${EXTRA_DOMAINS[@]}"; do
-    domain=$(echo "$domain" | xargs)  # trim whitespace
-    [ -z "$domain" ] && continue
-    echo "$domain" >> "$DOMAINS_FILE"
-  done
+  # Append extras from ALLOWED_DOMAINS (comma-separated).
+  # Leading dot means "domain and subdomains"; bare hostname means exact match.
+  #
+  # Squid rejects an ACL that contains both `foo.com` and `.foo.com`, so we
+  # auto-dedupe on insert: dot-prefix is broader and always wins. A bare
+  # hostname that a `.X` entry already covers is silently skipped; a new
+  # `.X` entry evicts any previously written bare `X`.
+  if [ -n "${ALLOWED_DOMAINS:-}" ]; then
+    echo "" >> "$DOMAINS_FILE"
+    echo "# From ALLOWED_DOMAINS env var" >> "$DOMAINS_FILE"
+    IFS=',' read -ra EXTRA_DOMAINS <<< "$ALLOWED_DOMAINS"
+    for domain in "${EXTRA_DOMAINS[@]}"; do
+      domain=$(echo "$domain" | xargs)  # trim whitespace
+      [ -z "$domain" ] && continue
+
+      if [[ "$domain" == .* ]]; then
+        # Dot-prefix entry: evict any existing bare form
+        bare="${domain#.}"
+        if grep -qxF "$bare" "$DOMAINS_FILE"; then
+          grep -vxF "$bare" "$DOMAINS_FILE" > "$DOMAINS_FILE.tmp"
+          mv "$DOMAINS_FILE.tmp" "$DOMAINS_FILE"
+          echo "# (dropped bare '$bare' in favor of '$domain')" >> "$DOMAINS_FILE"
+        fi
+      else
+        # Bare entry: skip if a dot-prefix version already covers it
+        if grep -qxF ".$domain" "$DOMAINS_FILE"; then
+          echo "# (skipped '$domain' — already covered by '.$domain')" >> "$DOMAINS_FILE"
+          continue
+        fi
+      fi
+
+      # Skip exact duplicate
+      if grep -qxF "$domain" "$DOMAINS_FILE"; then
+        continue
+      fi
+
+      echo "$domain" >> "$DOMAINS_FILE"
+    done
+  fi
 fi
 
 echo "Allowed domains written to $DOMAINS_FILE"
+
+# Toggle squid between allowlist and fully-open mode based on ALLOW_ALL_DOMAINS.
+# We rewrite squid.conf in place (idempotent) so flipping the env var between
+# runs switches modes without rebuilding the image.
+if [ "${ALLOW_ALL_DOMAINS:-}" = "1" ]; then
+  echo "ALLOW_ALL_DOMAINS=1: squid will allow all destinations"
+  sed -i -E 's|^http_access allow (allowed_domains\|all)$|http_access allow all|' /etc/squid/squid.conf
+else
+  sed -i -E 's|^http_access allow (allowed_domains\|all)$|http_access allow allowed_domains|' /etc/squid/squid.conf
+fi
 
 # Clear any stale PID file left from a previous run
 rm -f /var/run/squid.pid
@@ -157,12 +205,21 @@ ip6tables -P OUTPUT DROP 2>/dev/null || true
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."
 
-# Verify: blocked domain through the proxy should fail
-if curl -x http://localhost:3128 --connect-timeout 5 -s -o /dev/null https://example.com 2>/dev/null; then
-  echo "ERROR: Firewall verification failed - example.com reachable via proxy"
-  exit 1
+# Verify: example.com behavior depends on the mode
+if [ "${ALLOW_ALL_DOMAINS:-}" = "1" ]; then
+  if curl -x http://localhost:3128 --connect-timeout 10 -s -o /dev/null https://example.com; then
+    echo "Firewall verification passed - example.com reachable via proxy (ALLOW_ALL_DOMAINS)"
+  else
+    echo "ERROR: ALLOW_ALL_DOMAINS mode but example.com unreachable via proxy"
+    exit 1
+  fi
 else
-  echo "Firewall verification passed - example.com blocked as expected"
+  if curl -x http://localhost:3128 --connect-timeout 5 -s -o /dev/null https://example.com 2>/dev/null; then
+    echo "ERROR: Firewall verification failed - example.com reachable via proxy"
+    exit 1
+  else
+    echo "Firewall verification passed - example.com blocked as expected"
+  fi
 fi
 
 # Verify: allowed domain through the proxy should work

@@ -103,6 +103,16 @@ ALLOWED_DOMAINS=pypi.org,files.pythonhosted.org,registry.npmjs.org
 
 The firewall is applied at container startup and cannot be modified from inside the container. Changes to `ALLOWED_DOMAINS` require a container restart.
 
+### Fully open mode
+
+To disable the domain allowlist entirely (traffic still flows through squid, so logs in `/var/log/squid/access.log` still work), set:
+
+```env
+ALLOW_ALL_DOMAINS=1
+```
+
+This is useful for exploratory work where you do not want to curate the allowlist. Flipping this env var and re-running `docker compose run` is enough — no rebuild needed.
+
 ## Security notes
 
 - The named volume isolates credentials from the host filesystem.
