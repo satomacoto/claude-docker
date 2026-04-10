@@ -89,13 +89,15 @@ docker build --no-cache -t claude-code .
 
 ## Firewall
 
-The container restricts outbound connections to whitelisted domains only. The following domains are always allowed:
+The container restricts outbound connections to an allowlist enforced by squid (proxy) and iptables. The default allowlist is modeled after Docker Sandboxes' default policies and covers:
 
-- GitHub (API, Web, Git+SSH)
-- `registry.npmjs.org` (npm)
-- `api.anthropic.com`, `sentry.io`, `statsig.anthropic.com`, `statsig.com` (Claude Code)
+- **AI services** — Anthropic (Claude), OpenAI/ChatGPT, Cursor, Gemini, Perplexity, etc.
+- **Package managers and toolchains** — npm, PyPI, crates.io, RubyGems, Go modules, Maven, NuGet, Homebrew, bun, gradle, etc.
+- **Code hosting and container registries** — GitHub, GitLab, Bitbucket, Docker Hub, GHCR, GCR, Quay, ECR, k8s.io, Launchpad
+- **Cloud infrastructure** — AWS, Google APIs, Azure, Vercel, jsDelivr, unpkg, etc.
+- **OS package repos** — Debian, Ubuntu, Alpine, Arch, Fedora, CentOS, LLVM APT
 
-Additional domains can be allowed via the `ALLOWED_DOMAINS` environment variable (comma-separated) in `.env`:
+See `init-firewall.sh` for the complete list. Additional domains can be allowed via the `ALLOWED_DOMAINS` environment variable (comma-separated) in `.env`:
 
 ```env
 ALLOWED_DOMAINS=pypi.org,files.pythonhosted.org,registry.npmjs.org

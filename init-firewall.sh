@@ -23,43 +23,138 @@ if [ "${ALLOW_ALL_DOMAINS:-}" = "1" ]; then
 .invalid
 EOF
 else
-  # Default allowlist: developer essentials (GitHub, npm, PyPI, Anthropic, etc.)
+  # Default allowlist: developer essentials. Modeled after Docker Sandboxes'
+  # default policies (ai-services, package-managers, code-and-containers,
+  # cloud-infrastructure, os-packages), converted to squid's dstdomain syntax.
+  #
   # Note: squid's dstdomain ACL treats a leading dot as "this domain and all
-  # subdomains", and errors if you list both `foo.com` and `.foo.com`. So each
-  # entry must be either a bare hostname OR `.parent` — not both.
+  # subdomains", and errors if you list both `foo.com` and `.foo.com`, or a
+  # dot-prefix version alongside a subdomain it already covers. So prefer a
+  # single `.parent` entry over multiple bare subdomains of the same parent.
   cat > "$DOMAINS_FILE" << 'EOF'
-# Version control and code hosting
+# AI services
+.anthropic.com
+.claude.ai
+.claude.com
+.chatgpt.com
+.openai.com
+.oaistatic.com
+.oaiusercontent.com
+.cursor.sh
+cursor.com
+cdn.openaimerge.com
+api.perplexity.ai
+gemini.google.com
+models.dev
+nanoclaw.dev
+.statsig.com
+sentry.io
+
+# Package managers and language toolchains
+.bun.sh
+.gradle.org
+.packagist.org
+packagist.com
+.yarnpkg.com
+.apache.org
+.astral.sh
+.pypa.io
+cocoapods.org
+cpan.org
+metacpan.org
+.crates.io
+dot.net
+dotnet.microsoft.com
+eclipse.org
+.pythonhosted.org
+.golang.org
+pkg.go.dev
+.goproxy.io
+haskell.org
+hex.pm
+java.com
+java.net
+maven.org
+nodejs.org
+nodesource.com
+npm.duckdb.org
+.npmjs.com
+.npmjs.org
+nuget.org
+pub.dev
+.pypi.org
+pypi.python.org
+.rubygems.org
+ruby-lang.org
+rubyonrails.org
+.rustup.rs
+.rust-lang.org
+spring.io
+swift.org
+tuf-repo-cdn.sigstore.dev
+ziglang.org
+
+# Code hosting and container registries
 .github.com
 .githubusercontent.com
 .gitlab.com
 .bitbucket.org
+.business.githubcopilot.com
+.docker.com
+.docker.io
+.gcr.io
+dhi.io
+ghcr.io
+.k8s.io
+.launchpad.net
+mcr.microsoft.com
+public.ecr.aws
+quay.io
+sourceforge.net
 
-# Package managers
-.npmjs.org
-.npmjs.com
-.yarnpkg.com
-.pypi.org
-.pythonhosted.org
-.rubygems.org
-.crates.io
-.goproxy.io
-proxy.golang.org
-
-# Python / Rust toolchains
-.astral.sh
-sh.rustup.rs
-.rust-lang.org
-
-# Anthropic + Claude Code
-.anthropic.com
-.claude.ai
-.claude.com
-sentry.io
-.statsig.com
+# Cloud infrastructure and common web services
+.amazonaws.com
+.googleapis.com
+.googleusercontent.com
+.gstatic.com
+.gvt1.com
+.public.blob.vercel-storage.com
+.visualstudio.com
+apis.google.com
+app.daytona.io
+azure.com
+binaries.prisma.sh
+challenges.cloudflare.com
+clerk.com
+csp.withgoogle.com
+dev.azure.com
+dl.google.com
+fastly.com
+figma.com
+hashicorp.com
+jsdelivr.net
+json-schema.org
+json.schemastore.org
+login.microsoftonline.com
+mise-versions.jdx.dev
+mise.run
+packages.microsoft.com
+play.google.com
+playwright.azureedge.net
+supabase.com
+unpkg.com
+vercel.com
+www.google.com
 
 # OS package repos
 .debian.org
 .ubuntu.com
+.alpinelinux.org
+apt.llvm.org
+archlinux.org
+centos.org
+fedoraproject.org
+packagecloud.io
 EOF
 
   # Append extras from ALLOWED_DOMAINS (comma-separated).
